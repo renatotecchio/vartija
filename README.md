@@ -9,9 +9,11 @@
   2. DNS reverso;
   3. mDNS;
   4. NetBIOS.
+- **Fabricante** pelo prefixo do MAC, a partir do registro do IEEE embutido no binário. Ajuda a identificar o que não tem nome. MACs aleatórios não têm fabricante.
 - **Apelido seu**, que aparece no lugar do hostname em toda a interface, e notas.
 - **MAC aleatório:** endereços administrados localmente, o MAC privado que celulares e notebooks inventam, são marcados como tal.
 - **Histórico** de eventos: novo dispositivo, troca de IP, marcado como conhecido, falhas de varredura.
+- **Interface em inglês e português**, e tema claro, escuro ou do sistema. Cada navegador guarda a sua escolha.
 - **Login próprio:** um arquivo htpasswd (bcrypt) e/ou um admin por variável de ambiente. Não depende de SSO.
 
 ## Como os MACs são descobertos
@@ -46,7 +48,7 @@ docker compose up -d --build
 
 Para desenvolver o frontend com hot reload, rode o backend pelo compose e depois `cd frontend && npm run dev`. O Vite faz proxy de `/api` para a porta 8090.
 
-`make test` roda os testes do backend e o typecheck do frontend.
+`make test` roda os testes do backend e o typecheck do frontend. `make oui` atualiza o registro de fabricantes do IEEE (`backend/internal/adapters/oui/oui.tsv.gz`).
 
 ## Configuração
 
@@ -73,6 +75,7 @@ Tudo por variável de ambiente. O [.env.example](.env.example) traz todas coment
 | `VARTIJA_MIKROTIK_USER` / `VARTIJA_MIKROTIK_PASSWORD` | — | usuário só de leitura |
 | `VARTIJA_SLACK_BOT_TOKEN` + `VARTIJA_SLACK_CHANNEL` | — | bot com `chat:write`, convidado para o canal |
 | `VARTIJA_SLACK_WEBHOOK_URL` | — | alternativa ao bot |
+| `VARTIJA_LANGUAGE` | `en` | idioma das mensagens do Slack: `en` ou `pt` |
 
 Para gerar uma linha do htpasswd sem o `htpasswd` instalado:
 

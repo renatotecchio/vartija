@@ -223,8 +223,10 @@ type deviceDTO struct {
 	Notes          string     `json:"notes"`
 	Hostname       string     `json:"hostname"`
 	HostnameSource string     `json:"hostname_source"`
+	Vendor         string     `json:"vendor"`
 	DisplayName    string     `json:"display_name"`
 	IP             string     `json:"ip"`
+	ExtraIPs       []string   `json:"extra_ips"`
 	SubnetID       uint       `json:"subnet_id"`
 	Status         string     `json:"status"`
 	RandomMAC      bool       `json:"random_mac"`
@@ -236,8 +238,8 @@ type deviceDTO struct {
 func toDeviceDTO(d domain.Device) deviceDTO {
 	return deviceDTO{
 		ID: d.ID, MAC: d.MAC, Nickname: d.Nickname, Notes: d.Notes,
-		Hostname: d.Hostname, HostnameSource: d.HostnameSource, DisplayName: d.DisplayName(),
-		IP: d.IP, SubnetID: d.SubnetID, Status: string(d.Status), RandomMAC: d.RandomMAC,
+		Hostname: d.Hostname, HostnameSource: d.HostnameSource, Vendor: d.Vendor, DisplayName: d.DisplayName(),
+		IP: d.IP, ExtraIPs: nonNil(d.ExtraIPs), SubnetID: d.SubnetID, Status: string(d.Status), RandomMAC: d.RandomMAC,
 		FirstSeen: d.FirstSeen, LastSeen: d.LastSeen, AcknowledgedAt: d.AcknowledgedAt,
 	}
 }
@@ -467,12 +469,13 @@ func (h *handlers) background(fn func(context.Context)) {
 // --- events ---
 
 type eventDTO struct {
-	ID       uint      `json:"id"`
-	Type     string    `json:"type"`
-	DeviceID *uint     `json:"device_id"`
-	SubnetID *uint     `json:"subnet_id"`
-	Message  string    `json:"message"`
-	At       time.Time `json:"at"`
+	ID       uint              `json:"id"`
+	Type     string            `json:"type"`
+	DeviceID *uint             `json:"device_id"`
+	SubnetID *uint             `json:"subnet_id"`
+	Message  string            `json:"message"`
+	Data     map[string]string `json:"data"`
+	At       time.Time         `json:"at"`
 }
 
 func (h *handlers) listEvents(c *gin.Context) {
@@ -487,12 +490,19 @@ func (h *handlers) listEvents(c *gin.Context) {
 	}
 	out := make([]eventDTO, len(list))
 	for i, e := range list {
-		out[i] = eventDTO{ID: e.ID, Type: string(e.Type), DeviceID: e.DeviceID, SubnetID: e.SubnetID, Message: e.Message, At: e.At}
+		out[i] = eventDTO{ID: e.ID, Type: string(e.Type), DeviceID: e.DeviceID, SubnetID: e.SubnetID, Message: e.Message, Data: e.Data, At: e.At}
 	}
 	c.JSON(http.StatusOK, out)
 }
 
 // --- helpers ---
+
+func nonNil(s []string) []string {
+	if s == nil {
+		return []string{}
+	}
+	return s
+}
 
 func idParam(c *gin.Context) (uint, bool) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)

@@ -10,8 +10,10 @@ export interface Device {
   notes: string;
   hostname: string;
   hostname_source: string;
+  vendor: string;
   display_name: string;
   ip: string;
+  extra_ips: string[];
   subnet_id: number;
   status: DeviceStatus;
   random_mac: boolean;
@@ -38,6 +40,7 @@ export interface VartijaEvent {
   device_id: number | null;
   subnet_id: number | null;
   message: string;
+  data: Record<string, string> | null;
   at: string;
 }
 

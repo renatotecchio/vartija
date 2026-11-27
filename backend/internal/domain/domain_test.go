@@ -26,7 +26,7 @@ func TestNormalizeMAC(t *testing.T) {
 }
 
 func TestIsRandomMAC(t *testing.T) {
-	if IsRandomMAC("a4:cb:8f:22:3c:2c") {
+	if IsRandomMAC("a4:cb:8f:00:00:01") {
 		t.Error("a4:... is a vendor MAC")
 	}
 	if !IsRandomMAC("da:a1:19:00:00:01") {
@@ -68,5 +68,21 @@ func TestDisplayName(t *testing.T) {
 	d.Nickname = "Impressora da sala"
 	if d.DisplayName() != "Impressora da sala" {
 		t.Error("nickname wins")
+	}
+}
+
+func TestSortIPsAndPickIP(t *testing.T) {
+	got := SortIPs([]string{"192.168.1.10", "x", "192.168.1.9", "192.168.1.10"})
+	if len(got) != 2 || got[0] != "192.168.1.9" || got[1] != "192.168.1.10" {
+		t.Fatalf("SortIPs: %v", got)
+	}
+	if m, e := PickIP("192.168.1.10", got); m != "192.168.1.10" || len(e) != 1 || e[0] != "192.168.1.9" {
+		t.Fatalf("keeps the current IP: %q %v", m, e)
+	}
+	if m, _ := PickIP("192.168.1.50", got); m != "192.168.1.9" {
+		t.Fatalf("lowest when the current one is gone: %q", m)
+	}
+	if m, e := PickIP("192.168.1.50", nil); m != "192.168.1.50" || e != nil {
+		t.Fatalf("no IPs keeps the current: %q %v", m, e)
 	}
 }

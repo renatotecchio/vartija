@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/netip"
+	"sort"
 	"strings"
 	"time"
 )
@@ -37,9 +39,15 @@ type Device struct {
 	// where it came from (dhcp, dns, mdns, netbios).
 	Hostname       string
 	HostnameSource string
-	IP             string
-	SubnetID       uint
-	Status         DeviceStatus
+	// Vendor is the manufacturer from the MAC's IEEE prefix ("" for random
+	// MACs and unknown prefixes).
+	Vendor string
+	// IP is the main address; ExtraIPs the others the MAC answered for in
+	// the last scan.
+	IP       string
+	ExtraIPs []string
+	SubnetID uint
+	Status   DeviceStatus
 	// RandomMAC is true for locally administered MACs, the private addresses
 	// phones and laptops make up per network.
 	RandomMAC      bool
@@ -70,6 +78,50 @@ func (d *Device) Acknowledge(now time.Time) {
 func (d *Device) Reopen() {
 	d.Status = StatusNew
 	d.AcknowledgedAt = nil
+}
+
+// PickIP keeps current when the device still answers on it, so a host with
+// several addresses doesn't "change IP" on every scan. Otherwise it takes
+// the lowest. It returns the main IP and the others.
+func PickIP(current string, ips []string) (string, []string) {
+	if len(ips) == 0 {
+		return current, nil
+	}
+	main := ips[0]
+	for _, ip := range ips {
+		if ip == current {
+			main = current
+			break
+		}
+	}
+	extra := make([]string, 0, len(ips)-1)
+	for _, ip := range ips {
+		if ip != main {
+			extra = append(extra, ip)
+		}
+	}
+	return main, extra
+}
+
+// SortIPs orders addresses numerically (192.168.1.9 before 192.168.1.10)
+// and drops duplicates and invalid ones.
+func SortIPs(ips []string) []string {
+	addrs := make([]netip.Addr, 0, len(ips))
+	seen := map[netip.Addr]bool{}
+	for _, s := range ips {
+		a, err := netip.ParseAddr(s)
+		if err != nil || seen[a] {
+			continue
+		}
+		seen[a] = true
+		addrs = append(addrs, a)
+	}
+	sort.Slice(addrs, func(i, j int) bool { return addrs[i].Less(addrs[j]) })
+	out := make([]string, len(addrs))
+	for i, a := range addrs {
+		out[i] = a.String()
+	}
+	return out
 }
 
 // ErrInvalidMAC is returned for anything that is not a 48-bit MAC.

@@ -50,6 +50,8 @@ type Config struct {
 	SlackToken   string
 	SlackChannel string
 	SlackWebhook string
+	// Language of the Slack messages: en or pt.
+	Language string
 }
 
 // Load reads the environment.
@@ -71,6 +73,7 @@ func Load() (Config, error) {
 		SlackToken:       os.Getenv("VARTIJA_SLACK_BOT_TOKEN"),
 		SlackChannel:     os.Getenv("VARTIJA_SLACK_CHANNEL"),
 		SlackWebhook:     os.Getenv("VARTIJA_SLACK_WEBHOOK_URL"),
+		Language:         strings.ToLower(env("VARTIJA_LANGUAGE", "en")),
 	}
 	var errs []error
 	var err error
@@ -115,6 +118,9 @@ func Load() (Config, error) {
 	c.MikrotikRouters = routers
 	if len(routers) > 0 && (c.MikrotikUser == "" || c.MikrotikPassword == "") {
 		errs = append(errs, errors.New("VARTIJA_MIKROTIK_USER and VARTIJA_MIKROTIK_PASSWORD are required with VARTIJA_MIKROTIK_ROUTERS"))
+	}
+	if c.Language != "en" && c.Language != "pt" {
+		errs = append(errs, fmt.Errorf("VARTIJA_LANGUAGE: %q is not supported (en, pt)", c.Language))
 	}
 	if c.SlackChannel != "" && c.SlackToken == "" {
 		errs = append(errs, errors.New("VARTIJA_SLACK_CHANNEL needs VARTIJA_SLACK_BOT_TOKEN"))

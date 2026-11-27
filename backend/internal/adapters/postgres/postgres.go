@@ -27,7 +27,10 @@ type deviceRow struct {
 	Notes          string `gorm:"size:1000;not null;default:''"`
 	Hostname       string `gorm:"size:255;not null;default:''"`
 	HostnameSource string `gorm:"size:20;not null;default:''"`
+	Vendor         string `gorm:"size:120;not null;default:''"`
 	IP             string `gorm:"column:ip;size:45;not null;default:''"`
+	// The other addresses of the MAC, comma separated
+	ExtraIPs       string `gorm:"column:extra_ips;size:1000;not null;default:''"`
 	SubnetID       uint   `gorm:"index"`
 	Status         string `gorm:"size:10;index;not null"`
 	RandomMAC      bool   `gorm:"column:random_mac;not null;default:false"`
@@ -60,8 +63,9 @@ type eventRow struct {
 	Type     string `gorm:"size:20;not null"`
 	DeviceID *uint  `gorm:"index"`
 	SubnetID *uint
-	Message  string    `gorm:"size:500;not null"`
-	At       time.Time `gorm:"index;not null"`
+	Message  string            `gorm:"size:500;not null"`
+	Data     map[string]string `gorm:"serializer:json;type:jsonb"`
+	At       time.Time         `gorm:"index;not null"`
 }
 
 func (eventRow) TableName() string { return "events" }
@@ -125,7 +129,7 @@ func NewDevices(db *gorm.DB) *Devices { return &Devices{db: db} }
 func toDevice(r deviceRow) domain.Device {
 	return domain.Device{
 		ID: r.ID, MAC: r.MAC, Nickname: r.Nickname, Notes: r.Notes,
-		Hostname: r.Hostname, HostnameSource: r.HostnameSource, IP: r.IP,
+		Hostname: r.Hostname, HostnameSource: r.HostnameSource, Vendor: r.Vendor, IP: r.IP, ExtraIPs: splitList(r.ExtraIPs),
 		SubnetID: r.SubnetID, Status: domain.DeviceStatus(r.Status), RandomMAC: r.RandomMAC,
 		FirstSeen: r.FirstSeen, LastSeen: r.LastSeen, AcknowledgedAt: r.AcknowledgedAt,
 	}
@@ -134,7 +138,7 @@ func toDevice(r deviceRow) domain.Device {
 func fromDevice(d domain.Device) deviceRow {
 	return deviceRow{
 		ID: d.ID, MAC: d.MAC, Nickname: d.Nickname, Notes: d.Notes,
-		Hostname: d.Hostname, HostnameSource: d.HostnameSource, IP: d.IP,
+		Hostname: d.Hostname, HostnameSource: d.HostnameSource, Vendor: truncate(d.Vendor, 120), IP: d.IP, ExtraIPs: truncate(strings.Join(d.ExtraIPs, ","), 1000),
 		SubnetID: d.SubnetID, Status: string(d.Status), RandomMAC: d.RandomMAC,
 		FirstSeen: d.FirstSeen, LastSeen: d.LastSeen, AcknowledgedAt: d.AcknowledgedAt,
 	}
@@ -151,8 +155,8 @@ func (r *Devices) List(ctx context.Context, f ports.DeviceFilter) ([]domain.Devi
 	}
 	if s := strings.TrimSpace(f.Search); s != "" {
 		like := "%" + escapeLike(strings.ToLower(s)) + "%"
-		q = q.Where("lower(mac) LIKE ? OR ip LIKE ? OR lower(hostname) LIKE ? OR lower(nickname) LIKE ? OR lower(notes) LIKE ?",
-			like, like, like, like, like)
+		q = q.Where("lower(mac) LIKE ? OR ip LIKE ? OR extra_ips LIKE ? OR lower(hostname) LIKE ? OR lower(nickname) LIKE ? OR lower(notes) LIKE ? OR lower(vendor) LIKE ?",
+			like, like, like, like, like, like, like)
 	}
 	var rows []deviceRow
 	if err := q.Order("CASE WHEN status = 'new' THEN 0 ELSE 1 END").Order("last_seen DESC").Find(&rows).Error; err != nil {
@@ -163,6 +167,13 @@ func (r *Devices) List(ctx context.Context, f ports.DeviceFilter) ([]domain.Devi
 		out[i] = toDevice(row)
 	}
 	return out, nil
+}
+
+func splitList(s string) []string {
+	if s == "" {
+		return nil
+	}
+	return strings.Split(s, ",")
 }
 
 func escapeLike(s string) string {
@@ -319,7 +330,7 @@ func NewEvents(db *gorm.DB) *Events { return &Events{db: db} }
 
 // Add inserts an event.
 func (r *Events) Add(ctx context.Context, e *domain.Event) error {
-	row := eventRow{Type: string(e.Type), DeviceID: e.DeviceID, SubnetID: e.SubnetID, Message: truncate(e.Message, 500), At: e.At}
+	row := eventRow{Type: string(e.Type), DeviceID: e.DeviceID, SubnetID: e.SubnetID, Message: truncate(e.Message, 500), Data: e.Data, At: e.At}
 	if err := r.db.WithContext(ctx).Create(&row).Error; err != nil {
 		return err
 	}
@@ -335,7 +346,7 @@ func (r *Events) List(ctx context.Context, limit int) ([]domain.Event, error) {
 	}
 	out := make([]domain.Event, len(rows))
 	for i, row := range rows {
-		out[i] = domain.Event{ID: row.ID, Type: domain.EventType(row.Type), DeviceID: row.DeviceID, SubnetID: row.SubnetID, Message: row.Message, At: row.At}
+		out[i] = domain.Event{ID: row.ID, Type: domain.EventType(row.Type), DeviceID: row.DeviceID, SubnetID: row.SubnetID, Message: row.Message, Data: row.Data, At: row.At}
 	}
 	return out, nil
 }

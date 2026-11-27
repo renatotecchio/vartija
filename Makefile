@@ -1,4 +1,4 @@
-.PHONY: help test lint frontend build run docker up down
+.PHONY: help test lint frontend build run docker up down oui
 
 help: ## List the targets
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-10s %s\n", $$1, $$2}'
@@ -14,6 +14,9 @@ frontend: ## Build the frontend into the backend's embed folder
 
 build: frontend ## Build bin/vartija (Linux, static)
 	cd backend && CGO_ENABLED=0 go build -trimpath -o ../bin/vartija ./cmd/vartija
+
+oui: ## Refresh the embedded MAC vendor registry from IEEE
+	cd backend && go run ./internal/adapters/oui/gen
 
 docker: ## Build the image vartija:local
 	docker build -t vartija:local .

@@ -128,7 +128,8 @@ func (s *DeviceService) acknowledge(ctx context.Context, d *domain.Device) {
 	_ = s.events.Add(ctx, &domain.Event{
 		Type:     domain.EventAcknowledged,
 		DeviceID: &d.ID,
-		Message:  fmt.Sprintf("%s marcado como conhecido", d.DisplayName()),
+		Message:  fmt.Sprintf("%s marked as known", d.DisplayName()),
+		Data:     map[string]string{"name": d.DisplayName(), "mac": d.MAC},
 		At:       now,
 	})
 }

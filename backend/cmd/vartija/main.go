@@ -18,6 +18,7 @@ import (
 	"github.com/renatotecchio/vartija/backend/internal/adapters/hostname"
 	"github.com/renatotecchio/vartija/backend/internal/adapters/httpapi"
 	"github.com/renatotecchio/vartija/backend/internal/adapters/mikrotik"
+	"github.com/renatotecchio/vartija/backend/internal/adapters/oui"
 	"github.com/renatotecchio/vartija/backend/internal/adapters/postgres"
 	"github.com/renatotecchio/vartija/backend/internal/adapters/slack"
 	"github.com/renatotecchio/vartija/backend/internal/app"
@@ -112,7 +113,7 @@ func run(log *slog.Logger) error {
 
 	var notifier ports.Notifier
 	if cfg.SlackEnabled() {
-		n, err := slack.New(cfg.SlackToken, cfg.SlackChannel, cfg.SlackWebhook, cfg.BaseURL)
+		n, err := slack.New(cfg.SlackToken, cfg.SlackChannel, cfg.SlackWebhook, cfg.BaseURL, cfg.Language)
 		if err != nil {
 			return err
 		}
@@ -121,7 +122,11 @@ func run(log *slog.Logger) error {
 		log.Warn("Slack not configured: new devices are only shown in the UI")
 	}
 
-	scan := app.NewScanService(devices, subnets, events, discoverers, resolvers, notifier, clock, log)
+	vendors, err := oui.Load()
+	if err != nil {
+		return fmt.Errorf("MAC vendor registry: %w", err)
+	}
+	scan := app.NewScanService(devices, subnets, events, discoverers, resolvers, notifier, clock, log).WithVendors(vendors)
 	handler, err := httpapi.New(httpapi.Deps{
 		Auth:           auth,
 		Devices:        app.NewDeviceService(devices, events, clock),
