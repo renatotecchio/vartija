@@ -1,14 +1,16 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { api, type Subnet } from "../api";
 import { absolute, relative } from "../format";
+import { useI18n, type Key } from "../i18n";
 import { Badge, Button, Card, Empty, ErrorBox, inputClass } from "./ui";
 
-const viaLabel: Record<string, string> = {
-  arp: "varredura ARP",
-  mikrotik: "tabela ARP do roteador",
+const viaKey: Record<string, Key> = {
+  arp: "subnets.via.arp",
+  mikrotik: "subnets.via.mikrotik",
 };
 
 export default function Subnets({ refresh, onScan }: { refresh: number; onScan: () => void }) {
+  const { t, locale } = useI18n();
   const [subnets, setSubnets] = useState<Subnet[]>([]);
   const [cidr, setCidr] = useState("");
   const [name, setName] = useState("");
@@ -20,11 +22,11 @@ export default function Subnets({ refresh, onScan }: { refresh: number; onScan: 
       setSubnets(await api.subnets());
       setError("");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Erro ao carregar");
+      setError(e instanceof Error ? e.message : t("common.loadError"));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     load();
@@ -36,7 +38,7 @@ export default function Subnets({ refresh, onScan }: { refresh: number; onScan: 
       setError("");
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Erro");
+      setError(e instanceof Error ? e.message : t("common.error"));
     }
   };
 
@@ -51,12 +53,12 @@ export default function Subnets({ refresh, onScan }: { refresh: number; onScan: 
   };
 
   const rename = (s: Subnet) => {
-    const n = prompt("Nome da sub-rede", s.name);
+    const n = prompt(t("subnets.renamePrompt"), s.name);
     if (n !== null) run(() => api.updateSubnet(s.id, { name: n }));
   };
 
   const remove = (s: Subnet) => {
-    if (confirm(`Parar de monitorar ${s.cidr}? Os dispositivos já encontrados continuam na lista.`)) run(() => api.deleteSubnet(s.id));
+    if (confirm(t("subnets.removeConfirm", { cidr: s.cidr }))) run(() => api.deleteSubnet(s.id));
   };
 
   return (
@@ -64,29 +66,27 @@ export default function Subnets({ refresh, onScan }: { refresh: number; onScan: 
       <Card className="p-4">
         <form onSubmit={add} className="flex flex-wrap items-end gap-3">
           <label className="block">
-            <span className="mb-1 block text-sm font-medium">Sub-rede (CIDR)</span>
+            <span className="mb-1 block text-sm font-medium">{t("subnets.cidr")}</span>
             <input className={`${inputClass} w-48 font-mono`} placeholder="192.168.1.0/24" value={cidr} onChange={(e) => setCidr(e.target.value)} required />
           </label>
           <label className="block min-w-48 flex-1">
-            <span className="mb-1 block text-sm font-medium">Nome</span>
-            <input className={inputClass} placeholder="Ex.: LAN de casa" value={name} maxLength={100} onChange={(e) => setName(e.target.value)} />
+            <span className="mb-1 block text-sm font-medium">{t("subnets.name")}</span>
+            <input className={inputClass} placeholder={t("subnets.namePlaceholder")} value={name} maxLength={100} onChange={(e) => setName(e.target.value)} />
           </label>
           <Button type="submit" variant="primary">
-            Adicionar
+            {t("subnets.add")}
           </Button>
         </form>
-        <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
-          A primeira varredura de cada sub-rede é a linha de base: todos os MACs entram como novos, sem um alerta por dispositivo. Depois disso, cada MAC novo gera alerta.
-        </p>
+        <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">{t("subnets.baselineHint")}</p>
       </Card>
 
       <ErrorBox message={error} />
 
       <Card className="overflow-hidden">
         {loading ? (
-          <Empty>Carregando…</Empty>
+          <Empty>{t("common.loading")}</Empty>
         ) : subnets.length === 0 ? (
-          <Empty>Nenhuma sub-rede cadastrada.</Empty>
+          <Empty>{t("subnets.empty")}</Empty>
         ) : (
           <ul className="divide-y divide-slate-100 dark:divide-slate-800">
             {subnets.map((s) => (
@@ -95,24 +95,24 @@ export default function Subnets({ refresh, onScan }: { refresh: number; onScan: 
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="font-mono text-sm font-semibold">{s.cidr}</span>
                     {s.name && <span className="text-sm text-slate-600 dark:text-slate-300">{s.name}</span>}
-                    {!s.enabled && <Badge tone="muted">pausada</Badge>}
-                    {!s.baselined && s.enabled && <Badge tone="new">aguardando primeira varredura</Badge>}
+                    {!s.enabled && <Badge tone="muted">{t("subnets.paused")}</Badge>}
+                    {!s.baselined && s.enabled && <Badge tone="new">{t("subnets.waiting")}</Badge>}
                   </div>
                   <div className="text-xs text-slate-500 dark:text-slate-400">
                     {s.via ? (
-                      <>Via {viaLabel[s.via] ?? s.via}</>
+                      t("subnets.via", { via: viaKey[s.via] ? t(viaKey[s.via]) : s.via })
                     ) : (
-                      <span className="text-red-600 dark:text-red-400">Nenhuma interface ou roteador cobre esta sub-rede</span>
+                      <span className="text-red-600 dark:text-red-400">{t("subnets.uncovered")}</span>
                     )}
                     {s.last_scan_at && (
                       <>
                         {" · "}
-                        <span title={absolute(s.last_scan_at)}>última varredura {relative(s.last_scan_at)}</span>
-                        {!s.last_scan_error && <> · {s.last_scan_found} dispositivos</>}
+                        <span title={absolute(s.last_scan_at, locale)}>{t("subnets.lastScan", { when: relative(s.last_scan_at, locale) })}</span>
+                        {!s.last_scan_error && <> · {t("subnets.found", { n: s.last_scan_found })}</>}
                       </>
                     )}
                   </div>
-                  {s.last_scan_error && <div className="text-xs text-red-600 dark:text-red-400">Erro: {s.last_scan_error}</div>}
+                  {s.last_scan_error && <div className="text-xs text-red-600 dark:text-red-400">{t("subnets.error", { error: s.last_scan_error })}</div>}
                 </div>
                 <div className="flex flex-wrap gap-1.5">
                   <Button
@@ -124,16 +124,16 @@ export default function Subnets({ refresh, onScan }: { refresh: number; onScan: 
                     }
                     disabled={!s.enabled}
                   >
-                    Varrer
+                    {t("subnets.scan")}
                   </Button>
                   <Button variant="ghost" onClick={() => run(() => api.updateSubnet(s.id, { enabled: !s.enabled }))}>
-                    {s.enabled ? "Pausar" : "Retomar"}
+                    {s.enabled ? t("subnets.pause") : t("subnets.resume")}
                   </Button>
                   <Button variant="ghost" onClick={() => rename(s)}>
-                    Renomear
+                    {t("subnets.rename")}
                   </Button>
                   <Button variant="danger" onClick={() => remove(s)}>
-                    Remover
+                    {t("subnets.remove")}
                   </Button>
                 </div>
               </li>

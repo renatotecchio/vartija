@@ -1,29 +1,23 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, setUnauthorizedHandler, type Summary } from "./api";
+import { useI18n, type Key } from "./i18n";
 import Login from "./components/Login";
 import Devices from "./components/Devices";
 import Subnets from "./components/Subnets";
 import Events from "./components/Events";
-import { Button } from "./components/ui";
+import Preferences from "./components/Preferences";
+import { Button, Shield } from "./components/ui";
 
 type Tab = "devices" | "subnets" | "events";
 
-const tabs: { id: Tab; label: string }[] = [
-  { id: "devices", label: "Dispositivos" },
-  { id: "subnets", label: "Sub-redes" },
-  { id: "events", label: "Eventos" },
+const tabs: { id: Tab; label: Key }[] = [
+  { id: "devices", label: "nav.devices" },
+  { id: "subnets", label: "nav.subnets" },
+  { id: "events", label: "nav.events" },
 ];
 
-function Shield() {
-  return (
-    <svg aria-hidden viewBox="0 0 24 24" className="h-6 w-6 text-teal-600" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-      <circle cx="12" cy="11" r="3" />
-    </svg>
-  );
-}
-
 export default function App() {
+  const { t } = useI18n();
   const [user, setUser] = useState<string | null | undefined>(undefined);
   const [tab, setTab] = useState<Tab>("devices");
   const [summary, setSummary] = useState<Summary | null>(null);
@@ -43,20 +37,20 @@ export default function App() {
   useEffect(() => {
     if (!user) return;
     loadSummary();
-    const t = setInterval(loadSummary, 15000);
-    return () => clearInterval(t);
+    const id = setInterval(loadSummary, 15000);
+    return () => clearInterval(id);
   }, [user, loadSummary, refresh]);
 
   // While a scan runs, poll faster and reload the tab when it ends
   useEffect(() => {
     if (!summary?.scanning) return;
-    const t = setInterval(() => {
+    const id = setInterval(() => {
       api.summary().then((s) => {
         setSummary(s);
         if (!s.scanning) bump();
       });
     }, 2000);
-    return () => clearInterval(t);
+    return () => clearInterval(id);
   }, [summary?.scanning, bump]);
 
   if (user === undefined) return null;
@@ -84,19 +78,19 @@ export default function App() {
             <Shield />
             <span className="text-lg font-semibold tracking-tight">Vartija</span>
           </div>
-          <nav className="order-3 flex w-full gap-1 overflow-x-auto sm:order-none sm:w-auto">
-            {tabs.map((t) => (
+          <nav className="order-3 flex w-full gap-1 overflow-x-auto lg:order-none lg:w-auto">
+            {tabs.map((tb) => (
               <button
-                key={t.id}
-                onClick={() => setTab(t.id)}
+                key={tb.id}
+                onClick={() => setTab(tb.id)}
                 className={`rounded-md px-3 py-1.5 text-sm font-medium whitespace-nowrap ${
-                  tab === t.id
+                  tab === tb.id
                     ? "bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-white"
                     : "text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white"
                 }`}
               >
-                {t.label}
-                {t.id === "devices" && summary && summary.new > 0 && (
+                {t(tb.label)}
+                {tb.id === "devices" && summary && summary.new > 0 && (
                   <span className="ml-1.5 rounded-full bg-amber-500 px-1.5 py-0.5 text-xs font-semibold text-white">{summary.new}</span>
                 )}
               </button>
@@ -104,11 +98,12 @@ export default function App() {
           </nav>
           <div className="ml-auto flex items-center gap-2">
             <Button variant="primary" onClick={scanAll} disabled={summary?.scanning}>
-              {summary?.scanning ? "Varrendo…" : "Varrer agora"}
+              {summary?.scanning ? t("header.scanning") : t("header.scan")}
             </Button>
+            <Preferences />
             <span className="hidden text-sm text-slate-500 md:inline dark:text-slate-400">{user}</span>
             <Button variant="ghost" onClick={logout}>
-              Sair
+              {t("header.logout")}
             </Button>
           </div>
         </div>

@@ -1,23 +1,27 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, type Device, type DeviceStatus, type Subnet } from "../api";
 import { absolute, relative, sourceLabel } from "../format";
+import { useI18n, type Key } from "../i18n";
 import { Badge, Button, Card, Empty, ErrorBox, inputClass } from "./ui";
 import DeviceDialog from "./DeviceDialog";
 
 type Filter = DeviceStatus | "";
 
-const filters: { id: Filter; label: string }[] = [
-  { id: "new", label: "Novos" },
-  { id: "known", label: "Conhecidos" },
-  { id: "", label: "Todos" },
+const filters: { id: Filter; label: Key }[] = [
+  { id: "new", label: "devices.filter.new" },
+  { id: "known", label: "devices.filter.known" },
+  { id: "", label: "devices.filter.all" },
 ];
 
 function initialFilter(): Filter {
   const s = new URLSearchParams(window.location.search).get("status");
-  return s === "known" || s === "all" ? (s === "all" ? "" : s) : "new";
+  if (s === "known") return "known";
+  if (s === "all") return "";
+  return "new";
 }
 
 export default function Devices({ refresh, onChange }: { refresh: number; onChange: () => void }) {
+  const { t, locale } = useI18n();
   const [filter, setFilter] = useState<Filter>(initialFilter);
   const [search, setSearch] = useState("");
   const [subnetId, setSubnetId] = useState(0);
@@ -35,20 +39,20 @@ export default function Devices({ refresh, onChange }: { refresh: number; onChan
       setSubnets(s);
       setError("");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Erro ao carregar");
+      setError(e instanceof Error ? e.message : t("common.loadError"));
     } finally {
       setLoading(false);
     }
-  }, [filter, search, subnetId]);
+  }, [filter, search, subnetId, t]);
 
   useEffect(() => {
-    const t = setTimeout(load, search ? 250 : 0);
-    return () => clearTimeout(t);
+    const id = setTimeout(load, search ? 250 : 0);
+    return () => clearTimeout(id);
   }, [load, refresh, search]);
 
   useEffect(() => {
-    const t = setInterval(load, 30000);
-    return () => clearInterval(t);
+    const id = setInterval(load, 30000);
+    return () => clearInterval(id);
   }, [load]);
 
   useEffect(() => setSelected(new Set()), [filter, subnetId]);
@@ -73,7 +77,7 @@ export default function Devices({ refresh, onChange }: { refresh: number; onChan
       await load();
       onChange();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Erro");
+      setError(e instanceof Error ? e.message : t("common.error"));
     }
   };
 
@@ -89,7 +93,7 @@ export default function Devices({ refresh, onChange }: { refresh: number; onChan
   const toggleAll = () => setSelected(allSelected ? new Set() : new Set(devices.map((d) => d.id)));
 
   const markAllNew = () => {
-    if (!confirm(`Marcar todos os ${newIds.length} dispositivos novos como conhecidos?`)) return;
+    if (!confirm(t("devices.markAllConfirm", { n: newIds.length }))) return;
     after(() => api.acknowledgeAll());
   };
 
@@ -105,20 +109,14 @@ export default function Devices({ refresh, onChange }: { refresh: number; onChan
                 filter === f.id ? "bg-teal-600 text-white" : "text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white"
               }`}
             >
-              {f.label}
+              {t(f.label)}
             </button>
           ))}
         </div>
-        <input
-          className={`${inputClass} max-w-xs`}
-          placeholder="Buscar MAC, IP, nome, notas…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          aria-label="Buscar"
-        />
+        <input className={`${inputClass} max-w-xs`} placeholder={t("devices.search")} value={search} onChange={(e) => setSearch(e.target.value)} aria-label={t("devices.search")} />
         {subnets.length > 1 && (
-          <select className={`${inputClass} w-auto`} value={subnetId} onChange={(e) => setSubnetId(Number(e.target.value))} aria-label="Sub-rede">
-            <option value={0}>Todas as sub-redes</option>
+          <select className={`${inputClass} w-auto`} value={subnetId} onChange={(e) => setSubnetId(Number(e.target.value))} aria-label={t("devices.subnet")}>
+            <option value={0}>{t("devices.allSubnets")}</option>
             {subnets.map((s) => (
               <option key={s.id} value={s.id}>
                 {s.name ? `${s.name} (${s.cidr})` : s.cidr}
@@ -129,12 +127,10 @@ export default function Devices({ refresh, onChange }: { refresh: number; onChan
         <div className="ml-auto flex flex-wrap gap-2">
           {selected.size > 0 && (
             <Button variant="primary" onClick={() => after(() => api.acknowledge([...selected]))}>
-              Marcar {selected.size} como conhecidos
+              {t("devices.markSelected", { n: selected.size })}
             </Button>
           )}
-          {filter === "new" && newIds.length > 0 && selected.size === 0 && (
-            <Button onClick={markAllNew}>Marcar todos os novos como conhecidos</Button>
-          )}
+          {filter === "new" && newIds.length > 0 && selected.size === 0 && <Button onClick={markAllNew}>{t("devices.markAllNew")}</Button>}
         </div>
       </div>
 
@@ -142,15 +138,9 @@ export default function Devices({ refresh, onChange }: { refresh: number; onChan
 
       <Card className="overflow-hidden">
         {loading ? (
-          <Empty>Carregando…</Empty>
+          <Empty>{t("common.loading")}</Empty>
         ) : devices.length === 0 ? (
-          <Empty>
-            {filter === "new"
-              ? subnets.length === 0
-                ? "Nenhuma sub-rede cadastrada ainda. Adicione uma na aba Sub-redes."
-                : "Nenhum dispositivo novo. Tudo revisado."
-              : "Nenhum dispositivo encontrado."}
-          </Empty>
+          <Empty>{filter === "new" ? (subnets.length === 0 ? t("devices.emptyNoSubnets") : t("devices.emptyNew")) : t("devices.empty")}</Empty>
         ) : (
           <>
             {/* Desktop: table */}
@@ -158,32 +148,36 @@ export default function Devices({ refresh, onChange }: { refresh: number; onChan
               <thead className="border-b border-slate-200 bg-slate-50 text-left text-xs font-semibold tracking-wide text-slate-500 uppercase dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-400">
                 <tr>
                   <th className="w-10 px-3 py-2">
-                    <input type="checkbox" checked={allSelected} onChange={toggleAll} aria-label="Selecionar todos" />
+                    <input type="checkbox" checked={allSelected} onChange={toggleAll} aria-label={t("devices.selectAll")} />
                   </th>
-                  <th className="px-3 py-2">Dispositivo</th>
-                  <th className="px-3 py-2">MAC</th>
-                  <th className="px-3 py-2">IP</th>
-                  <th className="px-3 py-2">Sub-rede</th>
-                  <th className="px-3 py-2">Visto</th>
-                  <th className="px-3 py-2 text-right">Ações</th>
+                  <th className="px-3 py-2">{t("devices.col.device")}</th>
+                  <th className="px-3 py-2">{t("devices.col.mac")}</th>
+                  <th className="px-3 py-2">{t("devices.col.ip")}</th>
+                  <th className="px-3 py-2">{t("devices.col.subnet")}</th>
+                  <th className="px-3 py-2">{t("devices.col.seen")}</th>
+                  <th className="px-3 py-2 text-right">{t("devices.col.actions")}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                 {devices.map((d) => (
                   <tr key={d.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
                     <td className="px-3 py-2">
-                      <input type="checkbox" checked={selected.has(d.id)} onChange={() => toggle(d.id)} aria-label={`Selecionar ${d.display_name}`} />
+                      <input type="checkbox" checked={selected.has(d.id)} onChange={() => toggle(d.id)} aria-label={t("devices.select", { name: d.display_name })} />
                     </td>
-                    <td className="px-3 py-2">
+                    <td className="max-w-72 px-3 py-2">
                       <NameCell d={d} onEdit={() => setEditing(d)} />
                     </td>
                     <td className="px-3 py-2">
                       <MacCell d={d} />
                     </td>
-                    <td className="px-3 py-2 font-mono text-xs tabular-nums">{d.ip}</td>
+                    <td className="px-3 py-2 font-mono text-xs tabular-nums">
+                      <IPCell d={d} />
+                    </td>
                     <td className="px-3 py-2 text-slate-600 dark:text-slate-300">{subnetName.get(d.subnet_id) ?? "—"}</td>
-                    <td className="px-3 py-2 text-slate-600 dark:text-slate-300">
-                      <span title={`Visto pela última vez: ${absolute(d.last_seen)}\nPrimeira vez: ${absolute(d.first_seen)}`}>{relative(d.last_seen)}</span>
+                    <td className="px-3 py-2 whitespace-nowrap text-slate-600 dark:text-slate-300">
+                      <span title={t("devices.seenTitle", { last: absolute(d.last_seen, locale), first: absolute(d.first_seen, locale) })}>
+                        {relative(d.last_seen, locale)}
+                      </span>
                     </td>
                     <td className="px-3 py-2 text-right whitespace-nowrap">
                       <RowActions d={d} onEdit={() => setEditing(d)} after={after} />
@@ -197,12 +191,15 @@ export default function Devices({ refresh, onChange }: { refresh: number; onChan
             <ul className="divide-y divide-slate-100 md:hidden dark:divide-slate-800">
               {devices.map((d) => (
                 <li key={d.id} className="flex gap-3 p-3">
-                  <input type="checkbox" className="mt-1" checked={selected.has(d.id)} onChange={() => toggle(d.id)} aria-label={`Selecionar ${d.display_name}`} />
+                  <input type="checkbox" className="mt-1.5 self-start" checked={selected.has(d.id)} onChange={() => toggle(d.id)} aria-label={t("devices.select", { name: d.display_name })} />
                   <div className="min-w-0 flex-1 space-y-1">
                     <NameCell d={d} onEdit={() => setEditing(d)} />
                     <MacCell d={d} />
                     <div className="text-xs text-slate-500 dark:text-slate-400">
-                      <span className="font-mono">{d.ip}</span> · {subnetName.get(d.subnet_id) ?? "—"} · {relative(d.last_seen)}
+                      <span className="font-mono">
+                        <IPCell d={d} />
+                      </span>{" "}
+                      · {subnetName.get(d.subnet_id) ?? "—"} · {relative(d.last_seen, locale)}
                     </div>
                     <div className="pt-1">
                       <RowActions d={d} onEdit={() => setEditing(d)} after={after} />
@@ -232,58 +229,76 @@ export default function Devices({ refresh, onChange }: { refresh: number; onChan
 }
 
 function NameCell({ d, onEdit }: { d: Device; onEdit: () => void }) {
-  const secondary = d.nickname && d.hostname ? d.hostname : "";
+  const { t } = useI18n();
+  const title = d.nickname || d.hostname;
+  // Second line: the hostname under a nickname, and where the name came from
+  const details: string[] = [];
+  if (d.nickname && d.hostname) details.push(d.hostname);
+  if (d.hostname && d.hostname_source) {
+    const src = sourceLabel[d.hostname_source] ?? d.hostname_source;
+    details.push(d.nickname ? src : t("devices.nameVia", { source: src }));
+  }
   return (
     <div className="min-w-0">
       <div className="flex items-center gap-2">
-        <button onClick={onEdit} className="truncate text-left font-medium hover:text-teal-700 hover:underline dark:hover:text-teal-400" title="Editar nome e notas">
-          {d.nickname || d.hostname || <span className="text-slate-400 italic">sem nome</span>}
+        <button onClick={onEdit} className="truncate text-left font-medium hover:text-teal-700 hover:underline dark:hover:text-teal-400" title={t("devices.editHint")}>
+          {title || <span className="font-normal text-slate-400 italic">{d.vendor ? d.vendor : t("devices.noName")}</span>}
         </button>
-        {d.status === "new" ? <Badge tone="new">novo</Badge> : null}
+        {d.status === "new" ? <Badge tone="new">{t("devices.badgeNew")}</Badge> : null}
       </div>
-      {(secondary || d.hostname_source) && (
-        <div className="truncate text-xs text-slate-500 dark:text-slate-400">
-          {secondary}
-          {d.hostname && d.hostname_source && (
-            <span className="text-slate-400 dark:text-slate-500">
-              {secondary ? " · " : ""}
-              {d.nickname ? "" : "nome via "}
-              {sourceLabel[d.hostname_source] ?? d.hostname_source}
-            </span>
-          )}
-        </div>
-      )}
+      {details.length > 0 && <div className="truncate text-xs text-slate-500 dark:text-slate-400">{details.join(" · ")}</div>}
       {d.notes && <div className="truncate text-xs text-slate-500 italic dark:text-slate-400">{d.notes}</div>}
     </div>
   );
 }
 
 function MacCell({ d }: { d: Device }) {
+  const { t } = useI18n();
   return (
-    <div className="flex items-center gap-2">
-      <span className="font-mono text-xs">{d.mac}</span>
-      {d.random_mac && (
-        <Badge tone="warn" title="Endereço administrado localmente: celulares e notebooks criam um MAC privado por rede">
-          aleatório
-        </Badge>
+    <div className="min-w-0">
+      <div className="flex items-center gap-2">
+        <span className="font-mono text-xs">{d.mac}</span>
+        {d.random_mac && (
+          <Badge tone="warn" title={t("devices.randomHint")}>
+            {t("devices.random")}
+          </Badge>
+        )}
+      </div>
+      {/* Without a name the vendor is already the title of the row */}
+      {d.vendor && (d.nickname || d.hostname) && (
+        <div className="max-w-56 truncate text-xs text-slate-500 dark:text-slate-400" title={d.vendor}>
+          {d.vendor}
+        </div>
       )}
     </div>
   );
 }
 
+function IPCell({ d }: { d: Device }) {
+  const { t } = useI18n();
+  if (!d.extra_ips?.length) return <>{d.ip}</>;
+  return (
+    <span className="whitespace-nowrap" title={t("devices.extraIPs", { ips: d.extra_ips.join(", ") })}>
+      {d.ip}{" "}
+      <span className="rounded bg-slate-100 px-1 font-sans text-[11px] text-slate-600 dark:bg-slate-800 dark:text-slate-300">+{d.extra_ips.length}</span>
+    </span>
+  );
+}
+
 function RowActions({ d, onEdit, after }: { d: Device; onEdit: () => void; after: (fn: () => Promise<unknown>) => void }) {
+  const { t } = useI18n();
   return (
     <div className="inline-flex gap-1.5">
       {d.status === "new" ? (
         <Button variant="primary" onClick={() => after(() => api.updateDevice(d.id, { status: "known" }))}>
-          Conhecido
+          {t("devices.known")}
         </Button>
       ) : (
-        <Button variant="ghost" onClick={() => after(() => api.updateDevice(d.id, { status: "new" }))} title="Voltar para a lista de novos">
-          Reabrir
+        <Button variant="ghost" onClick={() => after(() => api.updateDevice(d.id, { status: "new" }))} title={t("devices.reopenHint")}>
+          {t("devices.reopen")}
         </Button>
       )}
-      <Button onClick={onEdit}>Editar</Button>
+      <Button onClick={onEdit}>{t("common.edit")}</Button>
     </div>
   );
 }

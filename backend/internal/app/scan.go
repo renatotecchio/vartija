@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/netip"
+	"strconv"
 	"sync"
 	"time"
 
@@ -33,6 +34,7 @@ type ScanService struct {
 	discoverers []ports.Discoverer
 	resolver    ports.HostnameResolver
 	notifier    ports.Notifier
+	vendors     ports.VendorLookup
 	clock       ports.Clock
 	log         *slog.Logger
 
@@ -68,6 +70,19 @@ func NewScanService(
 		log:         log,
 		resolvedAt:  map[string]time.Time{},
 	}
+}
+
+// WithVendors sets the MAC vendor lookup (optional).
+func (s *ScanService) WithVendors(v ports.VendorLookup) *ScanService {
+	s.vendors = v
+	return s
+}
+
+func (s *ScanService) vendorOf(mac string) string {
+	if s.vendors == nil {
+		return ""
+	}
+	return s.vendors.Vendor(mac)
 }
 
 // Running reports whether a scan is in progress.
@@ -142,16 +157,31 @@ func (s *ScanService) ScanSubnet(ctx context.Context, subnetID uint) error {
 	// Normalize and dedupe, then look the names up in parallel (each source
 	// may wait up to a couple of seconds for a device that doesn't answer),
 	// then write.
+	// One entry per MAC, with every IP it answered for.
 	var batch []domain.Sighting
-	seen := map[string]bool{}
+	seen := map[string]int{} // MAC -> index in batch
 	for _, sg := range sightings {
 		mac, err := domain.NormalizeMAC(sg.MAC)
-		if err != nil || seen[mac] || mac == "00:00:00:00:00:00" || mac == "ff:ff:ff:ff:ff:ff" {
+		if err != nil || mac == "00:00:00:00:00:00" || mac == "ff:ff:ff:ff:ff:ff" {
 			continue
 		}
-		seen[mac] = true
+		if i, ok := seen[mac]; ok {
+			batch[i].IPs = append(batch[i].IPs, sg.IP)
+			if batch[i].Hostname == "" && sg.Hostname != "" {
+				batch[i].Hostname, batch[i].HostnameSource = sg.Hostname, sg.HostnameSource
+			}
+			continue
+		}
+		seen[mac] = len(batch)
 		sg.MAC = mac
+		sg.IPs = []string{sg.IP}
 		batch = append(batch, sg)
+	}
+	for i := range batch {
+		batch[i].IPs = domain.SortIPs(batch[i].IPs)
+		if len(batch[i].IPs) > 0 {
+			batch[i].IP = batch[i].IPs[0]
+		}
 	}
 	names := s.resolveNames(ctx, batch)
 
@@ -176,7 +206,8 @@ func (s *ScanService) ScanSubnet(ctx context.Context, subnetID uint) error {
 		s.addEvent(ctx, &domain.Event{
 			Type:     domain.EventBaseline,
 			SubnetID: &sn.ID,
-			Message:  fmt.Sprintf("Primeira varredura de %s: %d dispositivos", sn.CIDR, len(seen)),
+			Message:  fmt.Sprintf("First scan of %s: %d devices", sn.CIDR, len(seen)),
+			Data:     map[string]string{"cidr": sn.CIDR, "count": strconv.Itoa(len(seen))},
 			At:       now,
 		})
 		if s.notifier != nil {
@@ -215,9 +246,11 @@ func (s *ScanService) record(ctx context.Context, sn domain.Subnet, sg domain.Si
 		dev = domain.Device{
 			MAC:       sg.MAC,
 			IP:        sg.IP,
+			ExtraIPs:  sg.IPs[min(1, len(sg.IPs)):],
 			SubnetID:  sn.ID,
 			Status:    domain.StatusNew,
 			RandomMAC: domain.IsRandomMAC(sg.MAC),
+			Vendor:    s.vendorOf(sg.MAC),
 			FirstSeen: now,
 			LastSeen:  now,
 		}
@@ -229,7 +262,8 @@ func (s *ScanService) record(ctx context.Context, sn domain.Subnet, sg domain.Si
 			Type:     domain.EventNewDevice,
 			DeviceID: &dev.ID,
 			SubnetID: &sn.ID,
-			Message:  fmt.Sprintf("Novo dispositivo %s (%s) em %s", dev.DisplayName(), dev.IP, sn.CIDR),
+			Message:  fmt.Sprintf("New device %s (%s) on %s", dev.DisplayName(), dev.IP, sn.CIDR),
+			Data:     map[string]string{"name": dev.DisplayName(), "mac": dev.MAC, "ip": dev.IP, "cidr": sn.CIDR, "vendor": dev.Vendor},
 			At:       now,
 		})
 		// Before the baseline every MAC is new: the summary covers them.
@@ -243,19 +277,24 @@ func (s *ScanService) record(ctx context.Context, sn domain.Subnet, sg domain.Si
 		return false, err
 	}
 
-	ipChanged := sg.IP != "" && sg.IP != dev.IP
-	if ipChanged {
+	main, extra := domain.PickIP(dev.IP, sg.IPs)
+	if main != "" && main != dev.IP {
 		s.addEvent(ctx, &domain.Event{
 			Type:     domain.EventIPChanged,
 			DeviceID: &dev.ID,
 			SubnetID: &sn.ID,
-			Message:  fmt.Sprintf("%s mudou de IP: %s → %s", dev.DisplayName(), dev.IP, sg.IP),
+			Message:  fmt.Sprintf("%s changed IP: %s → %s", dev.DisplayName(), dev.IP, main),
+			Data:     map[string]string{"name": dev.DisplayName(), "mac": dev.MAC, "old_ip": dev.IP, "ip": main},
 			At:       now,
 		})
-		dev.IP = sg.IP
+		dev.IP = main
 	}
+	dev.ExtraIPs = extra
 	dev.SubnetID = sn.ID
 	dev.LastSeen = now
+	if dev.Vendor == "" {
+		dev.Vendor = s.vendorOf(dev.MAC)
+	}
 	if sg.Hostname != "" {
 		dev.Hostname, dev.HostnameSource = sg.Hostname, sg.HostnameSource
 	}
@@ -286,12 +325,16 @@ func (s *ScanService) resolveNames(ctx context.Context, batch []domain.Sighting)
 			s.resolvedAt[sg.MAC] = now
 			continue
 		}
-		ip, err := netip.ParseAddr(sg.IP)
-		if err != nil {
+		dev, err := s.devices.GetByMAC(ctx, sg.MAC)
+		main := sg.IP
+		if err == nil {
+			main, _ = domain.PickIP(dev.IP, sg.IPs)
+		}
+		ip, perr := netip.ParseAddr(main)
+		if perr != nil {
 			continue
 		}
-		dev, err := s.devices.GetByMAC(ctx, sg.MAC)
-		force := err != nil || dev.IP != sg.IP || dev.Hostname == ""
+		force := err != nil || dev.IP != main || dev.Hostname == ""
 		if last, ok := s.resolvedAt[sg.MAC]; ok && !force && now.Sub(last) < hostnameRefresh {
 			continue
 		}
@@ -326,7 +369,8 @@ func (s *ScanService) failScan(ctx context.Context, sn *domain.Subnet, cause err
 		s.addEvent(ctx, &domain.Event{
 			Type:     domain.EventScanFailed,
 			SubnetID: &sn.ID,
-			Message:  fmt.Sprintf("Falha na varredura de %s: %v", sn.CIDR, cause),
+			Message:  fmt.Sprintf("Scan of %s failed: %v", sn.CIDR, cause),
+			Data:     map[string]string{"cidr": sn.CIDR, "error": cause.Error()},
 			At:       now,
 		})
 	}

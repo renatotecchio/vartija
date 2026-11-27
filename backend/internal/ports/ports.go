@@ -22,7 +22,7 @@ var ErrConflict = errors.New("already exists")
 type DeviceFilter struct {
 	Status   domain.DeviceStatus // empty = any
 	SubnetID uint                // 0 = any
-	Search   string              // MAC, IP, hostname or nickname, case insensitive
+	Search   string              // MAC, IP, hostname, nickname, notes or vendor, case insensitive
 }
 
 // DeviceRepository stores devices.
@@ -87,6 +87,11 @@ type BaselineSummary struct {
 type Notifier interface {
 	NewDevice(ctx context.Context, a NewDeviceAlert) error
 	Baseline(ctx context.Context, s BaselineSummary) error
+}
+
+// VendorLookup names the manufacturer of a MAC ("" when unknown).
+type VendorLookup interface {
+	Vendor(mac string) string
 }
 
 // Clock lets tests control time.

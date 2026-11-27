@@ -62,3 +62,12 @@ export function ErrorBox({ message }: { message: string }) {
 export function Empty({ children }: { children: ReactNode }) {
   return <div className="px-4 py-10 text-center text-sm text-slate-500 dark:text-slate-400">{children}</div>;
 }
+
+export function Shield() {
+  return (
+    <svg aria-hidden viewBox="0 0 24 24" className="h-6 w-6 text-teal-600" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+      <circle cx="12" cy="11" r="3" />
+    </svg>
+  );
+}

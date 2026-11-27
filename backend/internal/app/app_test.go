@@ -217,6 +217,38 @@ func TestFirstScanIsABaselineWithoutPerDeviceAlerts(t *testing.T) {
 	}
 }
 
+type fakeVendors map[string]string
+
+func (f fakeVendors) Vendor(mac string) string { return f[mac[:8]] }
+
+func TestVendorIsFilledOnCreateAndBackfilled(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	f.disc.sightings = []domain.Sighting{{MAC: "a4:cb:8f:00:00:01", IP: "192.168.1.10"}}
+	_ = f.scan.ScanSubnet(ctx, f.subnet.ID)
+	d, _ := f.devices.GetByMAC(ctx, "a4:cb:8f:00:00:01")
+	if d.Vendor != "" {
+		t.Fatalf("no lookup configured, got %q", d.Vendor)
+	}
+	// A device recorded before the lookup existed gets its vendor on the next scan
+	f.scan.WithVendors(fakeVendors{"a4:cb:8f": "Espressif"})
+	_ = f.scan.ScanSubnet(ctx, f.subnet.ID)
+	d, _ = f.devices.GetByMAC(ctx, "a4:cb:8f:00:00:01")
+	if d.Vendor != "Espressif" {
+		t.Fatalf("want Espressif, got %q", d.Vendor)
+	}
+	f.disc.sightings = append(f.disc.sightings, domain.Sighting{MAC: "a4:cb:8f:00:00:02", IP: "192.168.1.11"})
+	_ = f.scan.ScanSubnet(ctx, f.subnet.ID)
+	if a := f.notifier.alerts; len(a) != 1 || a[0].Device.Vendor != "Espressif" {
+		t.Fatalf("the alert carries the vendor: %+v", a)
+	}
+	for _, e := range f.events.rows {
+		if e.Type == domain.EventNewDevice && e.Data["mac"] == "a4:cb:8f:00:00:02" && e.Data["vendor"] != "Espressif" {
+			t.Errorf("event data: %v", e.Data)
+		}
+	}
+}
+
 func TestNewMACAfterBaselineAlerts(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
@@ -259,6 +291,48 @@ func TestKnownDeviceIPChangeIsRecordedNotAlerted(t *testing.T) {
 	}
 	if d.Hostname != "host-192-168-1-20" {
 		t.Errorf("hostname should be looked up again after an IP change, got %q", d.Hostname)
+	}
+}
+
+func TestSeveralIPsOnOneMACDoNotFlap(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	scan := func(ips ...string) {
+		f.disc.sightings = nil
+		for _, ip := range ips {
+			f.disc.sightings = append(f.disc.sightings, domain.Sighting{MAC: "aa:bb:cc:00:00:01", IP: ip})
+		}
+		if err := f.scan.ScanSubnet(ctx, f.subnet.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	scan("192.168.1.201", "192.168.1.20") // map order: any
+	d, _ := f.devices.GetByMAC(ctx, "aa:bb:cc:00:00:01")
+	if d.IP != "192.168.1.20" || len(d.ExtraIPs) != 1 || d.ExtraIPs[0] != "192.168.1.201" {
+		t.Fatalf("want main .20 (lowest) and extra .201, got %q %v", d.IP, d.ExtraIPs)
+	}
+	for i := 0; i < 4; i++ {
+		if i%2 == 0 {
+			scan("192.168.1.201", "192.168.1.20")
+		} else {
+			scan("192.168.1.20", "192.168.1.201")
+		}
+	}
+	if n := f.events.count(domain.EventIPChanged); n != 0 {
+		t.Fatalf("the same two IPs in any order are no change, got %d events", n)
+	}
+	// .20 goes away: the main IP moves, once
+	scan("192.168.1.201")
+	scan("192.168.1.201")
+	d, _ = f.devices.GetByMAC(ctx, "aa:bb:cc:00:00:01")
+	if d.IP != "192.168.1.201" || len(d.ExtraIPs) != 0 || f.events.count(domain.EventIPChanged) != 1 {
+		t.Fatalf("got %q %v, %d events", d.IP, d.ExtraIPs, f.events.count(domain.EventIPChanged))
+	}
+	// .20 comes back: .201 stays the main one
+	scan("192.168.1.20", "192.168.1.201")
+	d, _ = f.devices.GetByMAC(ctx, "aa:bb:cc:00:00:01")
+	if d.IP != "192.168.1.201" || f.events.count(domain.EventIPChanged) != 1 {
+		t.Fatalf("got %q, %d events", d.IP, f.events.count(domain.EventIPChanged))
 	}
 }
 
