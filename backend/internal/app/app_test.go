@@ -8,6 +8,7 @@ import (
 	"net/netip"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -127,10 +128,10 @@ func (f *fakeDiscoverer) Discover(context.Context, netip.Prefix) ([]domain.Sight
 	return f.sightings, f.err
 }
 
-type fakeResolver struct{ calls int }
+type fakeResolver struct{ calls atomic.Int32 }
 
 func (f *fakeResolver) Resolve(_ context.Context, ip netip.Addr, _ string) (string, string) {
-	f.calls++
+	f.calls.Add(1)
 	return "host-" + strings.ReplaceAll(ip.String(), ".", "-"), "dns"
 }
 
@@ -269,13 +270,13 @@ func TestHostnameIsNotLookedUpEveryScan(t *testing.T) {
 		_ = f.scan.ScanSubnet(ctx, f.subnet.ID)
 		f.clock.t = f.clock.t.Add(5 * time.Minute)
 	}
-	if f.resolver.calls != 1 {
-		t.Errorf("want 1 lookup, got %d", f.resolver.calls)
+	if f.resolver.calls.Load() != 1 {
+		t.Errorf("want 1 lookup, got %d", f.resolver.calls.Load())
 	}
 	f.clock.t = f.clock.t.Add(hostnameRefresh)
 	_ = f.scan.ScanSubnet(ctx, f.subnet.ID)
-	if f.resolver.calls != 2 {
-		t.Errorf("want a refresh after %v, got %d lookups", hostnameRefresh, f.resolver.calls)
+	if f.resolver.calls.Load() != 2 {
+		t.Errorf("want a refresh after %v, got %d lookups", hostnameRefresh, f.resolver.calls.Load())
 	}
 }
 
